@@ -133,6 +133,13 @@ main{padding:4px 16px calc(96px + env(safe-area-inset-bottom))}
 .day.t-ferie{background:var(--ferie-s)} .day.t-ferie .k{color:var(--ferie)}
 .day.t-altro{background:var(--altro-s)} .day.t-altro .k{color:var(--altro)}
 .day.today{outline:2px solid var(--accent);outline-offset:1px}
+.day{position:relative}
+.day.avv::after{content:"";position:absolute;top:5px;right:5px;width:7px;height:7px;border-radius:50%;background:var(--danger)}
+.avv-box{background:#FDECEC;color:#991B1B;border-radius:16px;padding:12px 14px;margin-bottom:12px;font-size:14px}
+[data-theme=dark] .avv-box{background:#3A1A1A;color:#FCA5A5}
+.avv-box p{margin:4px 0}
+.riposo-ok{font-size:13px;color:var(--muted);margin:-6px 2px 14px}
+.chip-avv{display:inline-flex;align-items:center;gap:6px;margin-top:12px;background:rgba(255,255,255,.22);padding:6px 10px;border-radius:999px;font-size:13px;font-weight:700}
 .day.today .n{color:var(--accent)}
 .day.blank{background:none}
 .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
@@ -301,7 +308,31 @@ const splitOrari = c => {
 const orariTxt = c => { const o = splitOrari(c); return o.ini ? `${o.ini}–${o.fin}` : ""; };
 const richiedeOrari = c => /^(RIS|KS)/i.test(String(c || "").trim());
 const senzaAgente = c => { const u = String(c || "").toUpperCase().trim();
-  return !u || u === "R" || u === "RIPOSO" || u === "SC" || u === "C" || /CONG|FERI/.test(u) || /^RIS/.test(u); };
+  return !u || u === "R" || u === "RIPOSO" || u === "RICO" || u === "SC" || u === "C" || /CONG|FERI/.test(u) || /^RIS/.test(u); };
+// turno di lavoro (ha un orario): tutto tranne R, RICO, SC, ferie/congedo
+const diLavoro = c => { const u = splitOrari(c).base.toUpperCase().trim();
+  return !!u && !["R", "RIPOSO", "RICO", "SC", "C"].includes(u) && !/CONG|FERI/.test(u); };
+const fmtOre = h => { const m = Math.round(h * 60), neg = m < 0, a = Math.abs(m); return `${neg ? "-" : ""}${Math.floor(a / 60)} h${a % 60 ? " " + pad(a % 60) : ""}`; };
+const orariGiorno = g => g.orari ? `${g.orari.inizio}–${g.orari.fine}${g.orari.fineReale ? ` (fine reale ${g.orari.fineReale})` : ""}` : orariTxt(g.turno);
+const avvisiRiposo = g => (g.riposi || []).filter(r => !r.ok);
+function testoRiposo(r) {
+  const tra = r.giorniRiposo === 0 ? "" : r.giorniRiposo === 1 ? " (con 1 riposo R/SC in mezzo)" : ` (con ${r.giorniRiposo} riposi R/SC in mezzo)`;
+  return r.verso === "prima"
+    ? `Prima del turno: <b>${fmtOre(r.ore)}</b> di riposo dalla fine del ${esc(splitOrari(r.da.turno).base)} del ${breve(r.da.data)} (${r.da.fine}${r.da.reale ? ", reale" : ""})${tra}. Minimo: <b>${r.minimo} ore</b>.`
+    : `Dopo il turno: <b>${fmtOre(r.ore)}</b> di riposo fino al ${esc(splitOrari(r.a.turno).base)} del ${breve(r.a.data)} (inizio ${r.a.inizio})${tra}. Minimo: <b>${r.minimo} ore</b>.`;
+}
+function mostraAvvisiRiposo(g) {
+  const av = avvisiRiposo(g);
+  if (!av.length) return false;
+  hapticOk("warning");
+  openSheet(`
+    <div class="sh-title">⚠️ Riposo insufficiente</div>
+    <div class="sh-sub" style="text-transform:none">Il turno è stato salvato comunque. Controlla gli orari:</div>
+    <div class="avv-box">${av.map(r => `<p>${testoRiposo(r)}</p>`).join("")}</div>
+    <p class="hint">Regole: 11 ore tra due turni (anche con un RICO in mezzo), 30 ore con un R o SC in mezzo, 60 ore con due riposi (es. SC + R).</p>
+    <button class="btn soft" onclick="closeSheet()">Ho capito</button>`);
+  return true;
+}
 const abbr = (c, t) => { if (!c) return ""; if (t === "riserva") return "RIS"; const b = splitOrari(c).base; return b.length > 5 ? b.slice(0, 5) : b; };
 
 /* ---------- Stato ---------- */
@@ -424,14 +455,15 @@ function vHome() {
   <button class="hero t-${o.tipo}" onclick="apriGiorno('${o.data}')">
     <div class="hero-top"><span class="badge-w">Oggi</span>${ico(t.ico, 24)}</div>
     <div class="hero-code">${esc(splitOrari(o.turno).base || "—")}</div>
-    <div class="hero-label">${o.caricato ? t.label : "Turni non ancora caricati"}${orariTxt(o.turno) ? " · " + orariTxt(o.turno) : ""}</div>
+    <div class="hero-label">${o.caricato ? t.label : "Turni non ancora caricati"}${orariGiorno(o) ? " · " + orariGiorno(o) : ""}</div>
+    ${avvisiRiposo(o).length ? `<div class="chip-avv">⚠️ Riposo insufficiente</div>` : ""}
     ${team}
   </button>
   <div class="grid2">
     <button class="card mini" onclick="apriGiorno('${d.data}')">
       <div class="lbl">Domani · ${breve(d.data)}</div>
       <div class="val">${esc(splitOrari(d.turno).base || "—")}</div>
-      <div class="sub" style="color:var(--${d.tipo === "vuoto" ? "muted" : d.tipo})"><span class="dot" style="background:currentColor"></span>${orariTxt(d.turno) || TIPI[d.tipo].label}</div>
+      <div class="sub" style="color:var(--${d.tipo === "vuoto" ? "muted" : d.tipo})"><span class="dot" style="background:${avvisiRiposo(d).length ? "var(--danger)" : "currentColor"}"></span>${avvisiRiposo(d).length ? "⚠️ riposo corto" : (d.orari ? d.orari.inizio + "–" + d.orari.fine : orariTxt(d.turno)) || TIPI[d.tipo].label}</div>
     </button>
     <button class="card mini" onclick="vai('riserve')">
       <div class="lbl">Riserve oggi</div>
@@ -471,7 +503,7 @@ function vCal() {
   const cont = { servizio: 0, riserva: 0, riposo: 0, ferie: 0 };
   dati.giorni.forEach((g, i) => {
     if (cont[g.tipo] !== undefined) cont[g.tipo]++;
-    celle += `<button class="day t-${g.tipo} ${g.data === oggi ? "today" : ""}" onclick="apriGiorno('${g.data}')">
+    celle += `<button class="day t-${g.tipo} ${g.data === oggi ? "today" : ""} ${g.avviso ? "avv" : ""}" onclick="apriGiorno('${g.data}')">
       <span class="n">${i + 1}</span><span class="k">${esc(abbr(g.turno, g.tipo))}</span></button>`;
   });
   const stat = (n, l, c) => `<div class="stat"><b style="color:var(--${c})">${n}</b><span>${l}</span></div>`;
@@ -519,19 +551,25 @@ async function apriGiorno(data) {
       <div class="sh-title">Il tuo turno</div>
       <div class="sh-sub">${lunga(g.data)} ${fromIt(g.data).getFullYear()}</div>
       <div class="big t-${g.tipo}"><div class="ic">${ico(t.ico, 26)}</div>
-        <div><div class="k">${esc(splitOrari(g.turno).base || "—")}</div><div class="l">${g.caricato ? t.label : "Turni non ancora caricati"}${orariTxt(g.turno) ? " · " + orariTxt(g.turno) : ""}</div></div></div>
+        <div><div class="k">${esc(splitOrari(g.turno).base || "—")}</div><div class="l">${g.caricato ? t.label : "Turni non ancora caricati"}${orariGiorno(g) ? " · " + orariGiorno(g) : ""}</div></div></div>
+      ${avvisiRiposo(g).length ? `<div class="avv-box">${avvisiRiposo(g).map(r => `<p>⚠️ ${testoRiposo(r)}</p>`).join("")}</div>`
+        : (g.riposi || []).length ? `<div class="riposo-ok">✓ Riposi regolari${g.riposi.map(r => ` · ${r.verso} ${fmtOre(r.ore)}`).join("")}</div>` : ""}
+      ${diLavoro(g.turno) && !g.orari && g.modificabile ? `<p class="hint" style="margin-top:0">Inserisci gli orari del turno (Modifica turno) per il controllo dei riposi.</p>` : ""}
       ${col}
-      ${g.modificabile ? `<button class="btn soft" onclick="apriInserisci(S.giorno.data, S.giorno.turno, S.giorno.abbinato)">${ico("edit", 19)} ${g.turno ? "Modifica turno" : "Inserisci turno"}</button>` : ""}`);
+      ${diLavoro(g.turno) && g.orari ? `<button class="btn" style="margin-bottom:10px" onclick="apriFineReale()">${ico("edit", 19)} ${g.orari.fineReale ? "Modifica fine turno reale" : "Inserisci fine turno reale"}</button>` : ""}
+      ${g.modificabile ? `<button class="btn soft" onclick="apriInserisci(S.giorno.data, S.giorno.turno, S.giorno.abbinato, S.giorno.orari)">${ico("edit", 19)} ${g.turno ? "Modifica turno" : "Inserisci turno"}</button>` : ""}`);
   } catch (e) { closeSheet(); errore(e); }
 }
 
 /* ---------- Inserisci turno ---------- */
-function apriInserisci(data, turno, abbinato) {
+function apriInserisci(data, turno, abbinato, orari) {
   haptic();
   const limite = S.home.limiteInserimento;
   let d = data || S.home.oggi.data;
   if (fromIt(d) < fromIt(limite)) d = limite;
   const o = splitOrari(turno);
+  if (orari) { o.ini = orari.inizio; o.fin = orari.fine; }
+  const fr = orari && orari.fineReale ? orari.fineReale : "";
   const colleghi = S.home.colleghi || [];
   openSheet(`
     <div class="sh-title">${turno ? "Modifica turno" : "Inserisci turno"}</div>
@@ -540,12 +578,15 @@ function apriInserisci(data, turno, abbinato) {
     <input class="inp" type="date" id="f-data" min="${itToIso(limite)}" value="${itToIso(d)}">
     <label for="f-cod">Codice turno</label>
     <input class="inp" id="f-cod" placeholder="es. 762, 762D, RIS, KS" value="${esc(o.base)}" autocomplete="off" autocapitalize="characters" oninput="aggiornaModulo()">
-    <div class="chips">${["R", "RIS", "KS", "C", "SC"].map(c => `<button class="chip" onclick="document.getElementById('f-cod').value='${c}';aggiornaModulo();haptic()">${c}</button>`).join("")}</div>
+    <div class="chips">${["R", "RICO", "RIS", "KS", "C", "SC"].map(c => `<button class="chip" onclick="document.getElementById('f-cod').value='${c}';aggiornaModulo();haptic()">${c}</button>`).join("")}</div>
     <div id="f-orari" style="display:none">
       <div class="two">
-        <div><label for="f-ini">Inizio</label><input class="inp" type="time" id="f-ini" value="${esc(o.ini)}"></div>
-        <div><label for="f-fin">Fine</label><input class="inp" type="time" id="f-fin" value="${esc(o.fin)}"></div>
+        <div><label for="f-ini">Inizio</label><input class="inp" type="time" id="f-ini" value="${esc(o.ini)}" oninput="this.dataset.auto=''"></div>
+        <div><label for="f-fin">Fine prevista</label><input class="inp" type="time" id="f-fin" value="${esc(o.fin)}" oninput="this.dataset.auto=''"></div>
       </div>
+      <label for="f-real">Fine turno reale <span style="font-weight:500">(facoltativa, anche dopo)</span></label>
+      <input class="inp" type="time" id="f-real" value="${esc(fr)}">
+      <p class="hint" id="f-orari-hint" style="margin-bottom:0"></p>
     </div>
     <div id="f-agente" style="display:none">
       <label for="f-sec">Secondo agente</label>
@@ -555,31 +596,73 @@ function apriInserisci(data, turno, abbinato) {
       </select>
       <p class="hint" style="margin-bottom:0">Cambialo solo se sei abbinato a un collega diverso da quello previsto: lo vedrete tutti e due.</p>
     </div>
-    <p class="hint">R = riposo · RIS = riserva · KS · C = congedo (finisce anche nelle ferie) · SC</p>
+    <p class="hint">R = riposo · RICO · RIS = riserva · KS · C = congedo (finisce anche nelle ferie) · SC</p>
     <button class="btn" id="f-save" onclick="salvaTurno(this)">Salva turno</button>`);
   aggiornaModulo();
 }
 function aggiornaModulo() {
   const cod = $("#f-cod").value.trim();
-  $("#f-orari").style.display = richiedeOrari(cod) ? "" : "none";
+  const lav = diLavoro(cod);
+  $("#f-orari").style.display = lav ? "" : "none";
   $("#f-agente").style.display = cod && !senzaAgente(cod) ? "" : "none";
+  // orari già usati per lo stesso codice: compilati in automatico (si possono cambiare)
+  const cat = (S.home.catalogoOrari || {})[splitOrari(cod).base.toUpperCase()];
+  const ini = $("#f-ini"), fin = $("#f-fin");
+  if (cat && !richiedeOrari(cod)) {
+    if (!ini.value || ini.dataset.auto) { ini.value = cat.inizio; ini.dataset.auto = "1"; }
+    if (!fin.value || fin.dataset.auto) { fin.value = cat.fine; fin.dataset.auto = "1"; }
+  } else {
+    if (ini.dataset.auto) { ini.value = ""; ini.dataset.auto = ""; }
+    if (fin.dataset.auto) { fin.value = ""; fin.dataset.auto = ""; }
+  }
+  $("#f-orari-hint").textContent = richiedeOrari(cod) ? "Per RIS e KS l'orario è obbligatorio."
+    : ini.dataset.auto ? "Orari presi dall'ultima volta che è stato inserito questo turno: correggili se servono."
+    : "Gli orari servono per il controllo delle ore di riposo.";
 }
 async function salvaTurno(btn) {
   const iso = $("#f-data").value, codice = $("#f-cod").value.trim();
   if (!iso) return toast("Scegli una data", true);
   if (!codice) return toast("Scrivi il codice del turno", true);
   const params = { data: isoToIt(iso), codice };
-  if (richiedeOrari(codice)) {
-    params.inizio = $("#f-ini").value; params.fine = $("#f-fin").value;
-    if (!params.inizio || !params.fine) return toast("Indica l'orario di inizio e di fine", true);
+  if (diLavoro(codice)) {
+    const ini = $("#f-ini").value, fin = $("#f-fin").value, real = $("#f-real").value;
+    if (richiedeOrari(codice) && (!ini || !fin)) return toast("Indica l'orario di inizio e di fine", true);
+    if (!!ini !== !!fin) return toast("Indica sia l'inizio sia la fine del turno", true);
+    if (real && !ini) return toast("Per la fine reale servono anche inizio e fine prevista", true);
+    if (ini) { params.inizio = ini; params.fine = fin; params.fineReale = real; }
   }
   const sec = $("#f-sec");
   if (sec.dataset.cambiato && !senzaAgente(codice)) params.secondo = sec.value;
   busy(btn, true);
   try {
-    await api("inserisciTurno", params);
-    hapticOk(); closeSheet(); toast("Turno salvato ✓");
+    const g = await api("inserisciTurno", params);
+    closeSheet();
+    if (!mostraAvvisiRiposo(g)) { hapticOk(); toast("Turno salvato ✓"); }
     const d = fromIt(params.data); delete S.mesi[meseKey(d.getFullYear(), d.getMonth())];
+    ricarica(true);
+  } catch (e) { busy(btn, false); errore(e); }
+}
+
+/* ---------- Fine turno reale ---------- */
+function apriFineReale() {
+  haptic();
+  const g = S.giorno;
+  openSheet(`
+    <div class="sh-title">Fine turno reale</div>
+    <div class="sh-sub" style="text-transform:none">${esc(splitOrari(g.turno).base)} del ${lunga(g.data)} · previsto ${g.orari.inizio}–${g.orari.fine}</div>
+    <label for="f-fr">Ora di fine reale</label>
+    <input class="inp" type="time" id="f-fr" value="${esc(g.orari.fineReale || g.orari.fine)}">
+    <p class="hint">Serve per il controllo delle ore di riposo con il turno successivo.${g.orari.fineReale ? " Per toglierla, cancella l'ora e salva." : ""}</p>
+    <button class="btn" onclick="salvaFineReale(this)">Salva</button>`);
+}
+async function salvaFineReale(btn) {
+  const data = S.giorno.data, fr = $("#f-fr").value;
+  busy(btn, true);
+  try {
+    const g = await api("fineReale", { data, fineReale: fr });
+    S.giorno = g; closeSheet();
+    if (!mostraAvvisiRiposo(g)) { hapticOk(); toast("Fine reale salvata ✓"); }
+    const d = fromIt(data); delete S.mesi[meseKey(d.getFullYear(), d.getMonth())];
     ricarica(true);
   } catch (e) { busy(btn, false); errore(e); }
 }
@@ -872,7 +955,7 @@ function apriGuida() {
     <div class="sheet-list">
       ${voce("home", "servizio", "Home", "Il tuo turno di oggi e di domani, con i colleghi abbinati. Tocca una scheda per i dettagli.")}
       ${voce("cal", "servizio", "Calendario", "Tutti i tuoi turni del mese a colpo d'occhio. Tocca un giorno per vedere chi è con te o modificarlo.")}
-      ${voce("edit", "servizio", "Inserisci turno", "Aggiorna il tuo turno (es. 762, RIS, R). Per RIS e KS indichi anche l'orario; se il secondo agente è cambiato lo scegli dal menu. Consentito dal " + esc(S.home.limiteInserimento) + ". Con C o Congedo finisce anche nelle ferie.")}
+      ${voce("edit", "servizio", "Inserisci turno", "Aggiorna il tuo turno (es. 762, RIS, R). Indica inizio e fine (si compilano da soli se il turno è già stato inserito) e, dopo il turno, la fine reale: l'app controlla le ore di riposo (11 h, 30 h con un riposo, 60 h con SC + R) e ti avvisa se sono poche. Se il secondo agente è cambiato lo scegli dal menu. Consentito dal " + esc(S.home.limiteInserimento) + ". Con C o Congedo finisce anche nelle ferie.")}
       ${voce("shield", "riserva", "Riserve", "Chi è di riserva oggi e domani. Con «Avvisa le riserve» mandi una notifica solo a loro.")}
       ${voce("sun", "ferie", "Ferie", "Ferie e congedi futuri di tutto il deposito, e il modulo per segnalare le tue.")}
       ${voce("route", "servizio", "Tratte", "Il mantenimento delle tratte: tratti percorsi, scadenze e impianti. Si sincronizza con il tuo account Google.")}
@@ -957,11 +1040,11 @@ function init() {
 /* ============================================================
    DATI DI ESEMPIO (solo quando la pagina non è aperta da Telegram)
    ============================================================ */
-const DEMO_SEQ = ["762", "762D", "845", "R", "R", "RIS", "RIS", "910", "910D", "R", "C", "C", "SC", "R"];
+const DEMO_SEQ = ["762", "762D", "845", "R", "RICO", "RIS", "RIS", "910", "910D", "R", "C", "C", "SC", "R"];
 const DEMO_COL = ["Luca Bianchi", "Giulia Verdi", "Marco Russo", "Sara Gallo", "Paolo Conti", "Elena Ricci", "Davide Marino"];
 function demoTipo(c) {
   c = String(c || "").toUpperCase();
-  if (!c) return "vuoto"; if (c === "R") return "riposo"; if (c === "C") return "ferie";
+  if (!c) return "vuoto"; if (c === "R" || c === "RICO") return "riposo"; if (c === "C") return "ferie";
   if (c.startsWith("RIS")) return "riserva"; if (c === "SC") return "altro"; return "servizio";
 }
 function demoCodice(data) {
@@ -972,11 +1055,14 @@ function demoGiorno(data) {
   const turno = demoCodice(data), tipo = demoTipo(turno);
   const colleghi = tipo === "servizio" ? [{ nome: DEMO_COL[0], turno: turno.replace("D", "") + "D" }, { nome: DEMO_COL[1], turno: turno.replace("D", "") }]
     : tipo === "riserva" ? [{ nome: DEMO_COL[2], turno: "RIS 06-13" }, { nome: DEMO_COL[5], turno: "RIS 14-21" }] : [];
-  return { data, turno, tipo, caricato: true, colleghi, modificabile: fromIt(data) >= fromIt("05/10/2026") };
+  const lav = tipo === "servizio";
+  const orari = lav ? { inizio: "06:00", fine: "14:00", fineReale: "" } : null;
+  const riposi = lav ? [{ verso: "prima", ore: 9.5, minimo: 11, ok: false, giorniRiposo: 0, da: { data: toIt(new Date(fromIt(data) - 864e5)), turno: "910", fine: "20:30", reale: true }, a: { data, turno: "", inizio: "06:00" } }] : [];
+  return { data, turno, tipo, caricato: true, colleghi, modificabile: fromIt(data) >= fromIt("05/10/2026"), orari, riposi };
 }
 function demoMese(y, m) {
   const n = new Date(y, m + 1, 0).getDate(); const giorni = [];
-  for (let g = 1; g <= n; g++) { const data = `${pad(g)}/${pad(m + 1)}/${y}`; const turno = demoCodice(data); giorni.push({ data, turno, tipo: demoTipo(turno) }); }
+  for (let g = 1; g <= n; g++) { const data = `${pad(g)}/${pad(m + 1)}/${y}`; const turno = demoCodice(data); giorni.push({ data, turno, tipo: demoTipo(turno), avviso: g % 9 === 3 }); }
   return { anno: y, mese: m, giorni };
 }
 function demoApi(action, p) {
@@ -985,7 +1071,7 @@ function demoApi(action, p) {
   const out = {
     home: () => ({ colleghi: DEMO_COL.map((n, i) => ({ id: String(100 + i), nome: n })), utente: { id: "925394691", nome: "Mario Rossi", admin: true }, oggi: demoGiorno(toIt(oggi)), domani: demoGiorno(toIt(dom)),
       riserveOggi: ris(oggi), riserveDomani: { ...ris(dom), lista: ris(dom).lista.slice(0, 2) }, mese: demoMese(oggi.getFullYear(), oggi.getMonth()),
-      link: { grafici: "", plurimensile: "", mensile: "" }, limiteInserimento: "05/10/2026" }),
+      link: { grafici: "", plurimensile: "", mensile: "" }, limiteInserimento: "05/10/2026", catalogoOrari: { "762": { inizio: "05:40", fine: "13:25" }, "845": { inizio: "14:10", fine: "22:05" } } }),
     mese: () => demoMese(+p.anno, +p.mese),
     giorno: () => demoGiorno(p.data),
     ferie: () => [
@@ -993,7 +1079,7 @@ function demoApi(action, p) {
       { nome: "Mario Rossi", dal: toIt(new Date(Date.now() + 12 * 864e5)), al: toIt(new Date(Date.now() + 12 * 864e5)), nota: "Da turno: C", mio: true },
       { nome: DEMO_COL[4], dal: toIt(new Date(Date.now() + 26 * 864e5)), al: toIt(new Date(Date.now() + 40 * 864e5)), nota: "Congedo", mio: false },
     ],
-    inserisciTurno: () => demoGiorno(p.data), segnalaFerie: () => ({}), anomalia: () => ({}),
+    inserisciTurno: () => demoGiorno(p.data), fineReale: () => demoGiorno(p.data), segnalaFerie: () => ({}), anomalia: () => ({}),
     avvisaRiserve: () => ({ inviati: 3 }), broadcast: () => ({ inviati: 24 }),
   }[action];
   return new Promise(r => setTimeout(() => r(out()), 450));
